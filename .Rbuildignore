@@ -1,0 +1,5 @@
+^renv$
+^renv\.lock$
+^datascanr\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
