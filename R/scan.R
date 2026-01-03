@@ -1,3 +1,10 @@
+#' Scan an R object and report potential data issues
+#'
+#' @param x An R object (e.g. data.frame, vector)
+#' @param ... Reserved for future use
+#'
+#' @return A datascan_report object
+#' @export
 scan <- function(x, ...) {
   info <- detect_type(x)
 
