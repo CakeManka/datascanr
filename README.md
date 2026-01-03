@@ -29,3 +29,39 @@ Install the development version from GitHub:
 ```r
 # install.packages("remotes")
 remotes::install_github("CakeManka/datascanr")
+```
+
+---
+
+## 🚀 Quick Start
+
+```r
+library(datascanr)
+
+df <- data.frame(
+  id  = c("S1", "S2", "S3"),
+  age = c("20", "21", "22"),   # numeric stored as text
+  bmi = c(22.1, NA, 30.5),     # missing value
+  stringsAsFactors = FALSE
+)
+
+datascanr::scan(df)
+```
+
+
+##  Example output:
+
+```yaml
+datascanr
+- type: data_frame
+- dim : 3 x 3
+- missing(overall): 11.11%
+- issues: 🟨 2
+
+Top issues:
+ 🟨 Columns with missing rate >= 10% detected (bmi)
+ 🟨 Columns look numeric but are stored as text (age)
+
+Tip: `details(x)` for tables; `x$issues` for all issues.
+```
+
