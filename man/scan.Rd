@@ -2,18 +2,28 @@
 % Please edit documentation in R/scan.R
 \name{scan}
 \alias{scan}
-\title{Scan an R object and report potential data issues}
+\title{Scan an object and return a datascan report}
 \usage{
 scan(x, ...)
 }
 \arguments{
-\item{x}{An R object (e.g. data.frame, vector)}
+\item{x}{Any R object.}
 
-\item{...}{Reserved for future use}
+\item{...}{Additional options forwarded to specific scanners.}
 }
 \value{
-A datascan_report object
+An object of class \code{datascan_report}.
 }
 \description{
-Scan an R object and report potential data issues
+\code{scan()} dispatches on the class of \code{x} (S3) and returns a unified
+report containing:
+\itemize{
+\item \code{details}: descriptive summaries of the object
+\item \code{issues}: structured issues (info/warn/error) with suggestions
+\item \code{meta}: optional diagnostic info
+}
+}
+\details{
+Supported types include data.frame/tibble, matrix, list, SummarizedExperiment, Seurat,
+plus a default fallback for other objects.
 }

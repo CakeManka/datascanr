@@ -6,6 +6,7 @@ bucket_type <- function(v) {
   if (is.integer(v)) return("integer")
   if (is.numeric(v)) return("numeric")
   if (is.character(v)) return("character")
+  if (is.list(v)) return("list") # tibble/list-column 常见
   "other"
 }
 
@@ -20,44 +21,62 @@ suspect_numeric_text <- function(v, threshold = 0.9) {
   mean(!is.na(num)) >= threshold
 }
 
-scan_dataframe <- function(df, suspect_threshold = 0.9) {
+#' @export
+scan.data.frame <- function(x, ..., suspect_threshold = 0.9) {
+  df <- x
   issues <- new_issues()
 
   n <- nrow(df)
   p <- ncol(df)
   cn <- colnames(df) %||% rep("", p)
 
-  # Empty data frame
+  # ---- details ----
+  details <- c(
+    list(
+      nrow = n,
+      ncol = p,
+      missing_overall = if (n * p > 0) sum(is.na(df)) / (n * p) else NA_real_
+    ),
+    details_names(as.list(setNames(vector("list", p), cn))) # 仅借用 names helper
+  )
+
+  # ---- Empty data frame ----
   if (n == 0 || p == 0) {
     issues <- add_issue(
-      issues, "red", "DF_EMPTY",
-      "Data frame is empty (0 rows or 0 columns).",
-      paste0("nrow=", n, ", ncol=", p),
-      "Check data import steps (delimiter, header, file path)."
+      issues,
+      id = "df_empty",
+      severity = "error",
+      message = "Data frame is empty (0 rows or 0 columns).",
+      where = paste0("nrow=", n, ", ncol=", p),
+      suggestion = "Check data import steps (delimiter, header, file path)."
     )
   }
 
-  # Column names
+  # ---- Column names ----
   if (any(cn == "")) {
     issues <- add_issue(
-      issues, "yellow", "DF_COLNAME_MISSING",
-      "Empty column names detected (may break selection or joins).",
-      paste0("empty_names=", sum(cn == "")),
-      "Provide unique column names (e.g., make.names or manual renaming)."
+      issues,
+      id = "df_colname_missing",
+      severity = "warn",
+      message = "Empty column names detected (may break selection or joins).",
+      where = paste0("empty_names=", sum(cn == "")),
+      suggestion = "Provide unique column names (e.g., make.names or manual renaming)."
     )
   }
 
   dup_cn <- cn[duplicated(cn) & cn != ""]
   if (length(dup_cn) > 0) {
     issues <- add_issue(
-      issues, "yellow", "DF_COLNAME_DUP",
-      "Duplicate column names detected (common source of errors).",
-      paste(unique(dup_cn), collapse = ", "),
-      "Make column names unique (e.g., make.unique(colnames(df)))."
+      issues,
+      id = "df_colname_dup",
+      severity = "warn",
+      message = "Duplicate column names detected (common source of errors).",
+      where = paste(unique(dup_cn), collapse = ", "),
+      suggestion = "Make column names unique (e.g., make.unique(colnames(df)))."
     )
   }
 
-  # Missing values
+  # ---- Missing values by column ----
   na_mat <- is.na(df)
   miss_by_col <- data.frame(
     colname = cn,
@@ -70,22 +89,26 @@ scan_dataframe <- function(df, suspect_threshold = 0.9) {
   if (any(miss_by_col$na_rate >= 0.8, na.rm = TRUE)) {
     bad <- miss_by_col$colname[miss_by_col$na_rate >= 0.8]
     issues <- add_issue(
-      issues, "red", "DF_MISSING_VERY_HIGH",
-      "Columns with missing rate >= 80% detected.",
-      paste(bad, collapse = ", "),
-      "Consider dropping these columns or verify import/encoding."
+      issues,
+      id = "df_missing_very_high",
+      severity = "error",
+      message = "Columns with missing rate >= 80% detected.",
+      where = paste(bad, collapse = ", "),
+      suggestion = "Consider dropping these columns or verify import/encoding."
     )
   } else if (any(miss_by_col$na_rate >= 0.1, na.rm = TRUE)) {
     bad <- miss_by_col$colname[miss_by_col$na_rate >= 0.1]
     issues <- add_issue(
-      issues, "yellow", "DF_MISSING_HIGH",
-      "Columns with missing rate >= 10% detected.",
-      paste(bad, collapse = ", "),
-      "Handle missing values (drop, impute, or report in Methods)."
+      issues,
+      id = "df_missing_high",
+      severity = "warn",
+      message = "Columns with missing rate >= 10% detected.",
+      where = paste(bad, collapse = ", "),
+      suggestion = "Handle missing values (drop, impute, or report in Methods)."
     )
   }
 
-  # Type profile
+  # ---- Type profile ----
   type_profile <- data.frame(
     colname = cn,
     class = vapply(df, function(v) paste(class(v), collapse = "/"), character(1)),
@@ -98,13 +121,28 @@ scan_dataframe <- function(df, suspect_threshold = 0.9) {
     df, suspect_numeric_text, logical(1), threshold = suspect_threshold
   )
 
+  # list-columns (tibble常见)
+  list_cols <- type_profile$colname[type_profile$bucket == "list"]
+  if (length(list_cols) > 0) {
+    issues <- add_issue(
+      issues,
+      id = "df_list_columns",
+      severity = "info",
+      message = "List-columns detected (common in tibbles; may break some exporters/models).",
+      where = paste(list_cols, collapse = ", "),
+      suggestion = "Consider unnesting, extracting scalar fields, or converting to character."
+    )
+  }
+
   suspect_cols <- type_profile$colname[type_profile$suspect_numeric_text]
   if (length(suspect_cols) > 0) {
     issues <- add_issue(
-      issues, "yellow", "DF_TYPE_SUSPECT_NUMERIC_TEXT",
-      "Columns look numeric but are stored as text or factor.",
-      paste(suspect_cols, collapse = ", "),
-      "Clean text (trim spaces/commas) and convert to numeric."
+      issues,
+      id = "df_type_suspect_numeric_text",
+      severity = "warn",
+      message = "Columns look numeric but are stored as text or factor.",
+      where = paste(suspect_cols, collapse = ", "),
+      suggestion = "Clean text (trim spaces/commas) and convert to numeric."
     )
   }
 
@@ -112,10 +150,12 @@ scan_dataframe <- function(df, suspect_threshold = 0.9) {
   const_cols <- type_profile$colname[type_profile$n_unique <= 1]
   if (length(const_cols) > 0) {
     issues <- add_issue(
-      issues, "yellow", "DF_CONSTANT_COL",
-      "Constant columns detected (no information content).",
-      paste(const_cols, collapse = ", "),
-      "Consider dropping constant columns or verify import."
+      issues,
+      id = "df_constant_col",
+      severity = "warn",
+      message = "Constant columns detected (no information content).",
+      where = paste(const_cols, collapse = ", "),
+      suggestion = "Consider dropping constant columns or verify import."
     )
   }
 
@@ -131,26 +171,30 @@ scan_dataframe <- function(df, suspect_threshold = 0.9) {
     }
     if (length(inf_cols) > 0) {
       issues <- add_issue(
-        issues, "yellow", "DF_NUM_INF_NAN",
-        "Inf or NaN detected in numeric columns (may break statistics).",
-        paste(unique(inf_cols), collapse = ", "),
-        "Trace the source (divide-by-zero or overflow) and fix before analysis."
+        issues,
+        id = "df_num_inf_nan",
+        severity = "warn",
+        message = "Inf or NaN detected in numeric columns (may break statistics).",
+        where = paste(unique(inf_cols), collapse = ", "),
+        suggestion = "Trace the source (divide-by-zero or overflow) and fix before analysis."
       )
     }
   }
 
-  list(
-    input = list(type_tag = "data_frame", class = class(df)),
-    summary = list(
-      nrow = n,
-      ncol = p,
-      missing_overall = if (n * p > 0) sum(na_mat) / (n * p) else NA_real_,
-      n_suspect_numeric_text = sum(type_profile$suspect_numeric_text, na.rm = TRUE)
-    ),
-    tables = list(
-      missing_by_col = miss_by_col,
-      type_profile = type_profile
-    ),
-    issues = issues
+  # ---- attach tables into details (so users can inspect) ----
+  details$tables <- list(
+    missing_by_col = miss_by_col,
+    type_profile = type_profile
+  )
+  details$n_suspect_numeric_text <- sum(type_profile$suspect_numeric_text, na.rm = TRUE)
+
+  # ---- build report ----
+  type <- if (inherits(df, "tbl_df")) "tibble" else "data.frame"
+  new_datascan_report(
+    type = type,
+    class = class(df),
+    details = details,
+    issues = issues,
+    meta = list()
   )
 }
