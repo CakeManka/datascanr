@@ -56,7 +56,7 @@ df <- data.frame(
   stringsAsFactors = FALSE
 )
 
-r <- scan(df)
+r <- datascanr::scan(df)
 r
 
 # inspect details / issues
